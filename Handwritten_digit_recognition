@@ -1,0 +1,391 @@
+"""
+Handwritten Digit Recognition using CNN
+Author: Ramya Dattaraj Joshi
+Date: October 2024
+Description: CNN model with dropout, batch normalization, data augmentation
+             achieving 95%+ accuracy on MNIST dataset
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from tensorflow.keras.datasets import mnist
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import (Conv2D, MaxPooling2D, Flatten, Dense, 
+                                     Dropout, BatchNormalization)
+from tensorflow.keras.utils import to_categorical
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
+from sklearn.metrics import confusion_matrix, classification_report
+from PIL import Image
+
+# ==================== STEP 1: LOAD AND PREPROCESS DATA ====================
+
+def load_and_preprocess_data():
+    """
+    Load MNIST dataset and preprocess it
+    Returns: x_train, y_train, x_test, y_test, x_val, y_val
+    """
+    print("Loading MNIST dataset...")
+    
+    # Load dataset
+    (x_train, y_train), (x_test, y_test) = mnist.load_data()
+    
+    # Print dataset info
+    print(f"Training samples: {x_train.shape[0]}")
+    print(f"Test samples: {x_test.shape[0]}")
+    
+    # Split training data into train and validation (80-20 split)
+    val_split = int(0.8 * len(x_train))
+    x_val = x_train[val_split:]
+    y_val = y_train[val_split:]
+    x_train = x_train[:val_split]
+    y_train = y_train[:val_split]
+    
+    print(f"After split - Train: {x_train.shape[0]}, Val: {x_val.shape[0]}")
+    
+    # Reshape to (samples, height, width, channels)
+    x_train = x_train.reshape(-1, 28, 28, 1)
+    x_val = x_val.reshape(-1, 28, 28, 1)
+    x_test = x_test.reshape(-1, 28, 28, 1)
+    
+    # Normalize pixel values to [0, 1]
+    x_train = x_train.astype('float32') / 255.0
+    x_val = x_val.astype('float32') / 255.0
+    x_test = x_test.astype('float32') / 255.0
+    
+    # Convert labels to one-hot encoding
+    y_train = to_categorical(y_train, 10)
+    y_val = to_categorical(y_val, 10)
+    y_test = to_categorical(y_test, 10)
+    
+    print("Data preprocessing complete!")
+    return x_train, y_train, x_val, y_val, x_test, y_test
+
+
+# ==================== STEP 2: DATA AUGMENTATION ====================
+
+def create_data_augmentation():
+    """
+    Create ImageDataGenerator for data augmentation
+    This improves model generalization by creating variations of training images
+    """
+    print("Setting up data augmentation...")
+    
+    datagen = ImageDataGenerator(
+        rotation_range=10,       # Randomly rotate images by 10 degrees
+        width_shift_range=0.1,   # Randomly shift images horizontally by 10%
+        height_shift_range=0.1,  # Randomly shift images vertically by 10%
+        zoom_range=0.1           # Randomly zoom images by 10%
+    )
+    
+    return datagen
+
+
+# ==================== STEP 3: BUILD CNN MODEL ====================
+
+def build_cnn_model():
+    """
+    Build CNN model with Dropout and Batch Normalization
+    Architecture:
+    - Conv2D (32 filters) -> BatchNorm -> MaxPool -> Dropout
+    - Conv2D (64 filters) -> BatchNorm -> MaxPool -> Dropout
+    - Conv2D (128 filters) -> BatchNorm -> MaxPool -> Dropout
+    - Flatten
+    - Dense (128) -> BatchNorm -> Dropout
+    - Dense (10, softmax)
+    """
+    print("Building CNN model...")
+    
+    model = Sequential([
+        # First Convolutional Block
+        Conv2D(32, (3, 3), activation='relu', input_shape=(28, 28, 1)),
+        BatchNormalization(),  # Normalizes activations
+        MaxPooling2D((2, 2)),
+        Dropout(0.25),         # Prevents overfitting
+        
+        # Second Convolutional Block
+        Conv2D(64, (3, 3), activation='relu'),
+        BatchNormalization(),
+        MaxPooling2D((2, 2)),
+        Dropout(0.25),
+        
+        # Third Convolutional Block
+        Conv2D(128, (3, 3), activation='relu'),
+        BatchNormalization(),
+        Dropout(0.4),
+        
+        # Fully Connected Layers
+        Flatten(),
+        Dense(128, activation='relu'),
+        BatchNormalization(),
+        Dropout(0.5),
+        Dense(10, activation='softmax')  # 10 classes (digits 0-9)
+    ])
+    
+    # Compile model
+    model.compile(
+        optimizer='adam',
+        loss='categorical_crossentropy',
+        metrics=['accuracy']
+    )
+    
+    print("\nModel Architecture:")
+    model.summary()
+    
+    return model
+
+
+# ==================== STEP 4: TRAIN MODEL ====================
+
+def train_model(model, x_train, y_train, x_val, y_val, datagen, epochs=20):
+    """
+    Train the CNN model with callbacks
+    Returns: training history
+    """
+    print(f"\nTraining model for {epochs} epochs...")
+    
+    # Callbacks for better training
+    early_stopping = EarlyStopping(
+        monitor='val_loss',
+        patience=5,
+        restore_best_weights=True
+    )
+    
+    reduce_lr = ReduceLROnPlateau(
+        monitor='val_loss',
+        factor=0.5,
+        patience=3,
+        min_lr=0.00001
+    )
+    
+    # Fit model with data augmentation
+    history = model.fit(
+        datagen.flow(x_train, y_train, batch_size=64),
+        epochs=epochs,
+        validation_data=(x_val, y_val),
+        callbacks=[early_stopping, reduce_lr],
+        verbose=1
+    )
+    
+    return history
+
+
+# ==================== STEP 5: VISUALIZE TRAINING ====================
+
+def plot_training_history(history):
+    """
+    Plot training and validation accuracy/loss curves
+    """
+    print("\nVisualizing training history...")
+    
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    
+    # Accuracy plot
+    axes[0].plot(history.history['accuracy'], label='Training Accuracy', linewidth=2)
+    axes[0].plot(history.history['val_accuracy'], label='Validation Accuracy', linewidth=2)
+    axes[0].set_title('Model Accuracy Over Epochs', fontsize=14, fontweight='bold')
+    axes[0].set_xlabel('Epoch')
+    axes[0].set_ylabel('Accuracy')
+    axes[0].legend()
+    axes[0].grid(True, alpha=0.3)
+    
+    # Loss plot
+    axes[1].plot(history.history['loss'], label='Training Loss', linewidth=2)
+    axes[1].plot(history.history['val_loss'], label='Validation Loss', linewidth=2)
+    axes[1].set_title('Model Loss Over Epochs', fontsize=14, fontweight='bold')
+    axes[1].set_xlabel('Epoch')
+    axes[1].set_ylabel('Loss')
+    axes[1].legend()
+    axes[1].grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.savefig('training_curves.png', dpi=300, bbox_inches='tight')
+    plt.show()
+    
+    print("Training curves saved as 'training_curves.png'")
+
+
+# ==================== STEP 6: EVALUATE MODEL ====================
+
+def evaluate_model(model, x_test, y_test):
+    """
+    Evaluate model on test set and print results
+    """
+    print("\nEvaluating model on test set...")
+    
+    test_loss, test_accuracy = model.evaluate(x_test, y_test, verbose=0)
+    
+    print(f"\nTest Results:")
+    print(f"Test Loss: {test_loss:.4f}")
+    print(f"Test Accuracy: {test_accuracy*100:.2f}%")
+    
+    return test_accuracy
+
+
+# ==================== STEP 7: CONFUSION MATRIX ====================
+
+def plot_confusion_matrix(model, x_test, y_test):
+    """
+    Generate and plot confusion matrix
+    """
+    print("\nGenerating confusion matrix...")
+    
+    # Predict on test set
+    y_pred = model.predict(x_test)
+    y_pred_classes = np.argmax(y_pred, axis=1)
+    y_true_classes = np.argmax(y_test, axis=1)
+    
+    # Create confusion matrix
+    cm = confusion_matrix(y_true_classes, y_pred_classes)
+    
+    # Plot
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+                xticklabels=range(10), yticklabels=range(10))
+    plt.title('Confusion Matrix - Digit Recognition', fontsize=16, fontweight='bold')
+    plt.xlabel('Predicted Label', fontsize=12)
+    plt.ylabel('True Label', fontsize=12)
+    plt.savefig('confusion_matrix.png', dpi=300, bbox_inches='tight')
+    plt.show()
+    
+    print("Confusion matrix saved as 'confusion_matrix.png'")
+    
+    # Print classification report
+    print("\nClassification Report:")
+    print(classification_report(y_true_classes, y_pred_classes, 
+                                target_names=[str(i) for i in range(10)]))
+
+
+# ==================== STEP 8: PREDICT CUSTOM IMAGE ====================
+
+def predict_custom_image(image_path, model):
+    """
+    Predict digit from custom image
+    """
+    print(f"\nPredicting digit from: {image_path}")
+    
+    # Load and preprocess image
+    image = Image.open(image_path).convert('L')
+    image = image.resize((28, 28))
+    image_array = np.array(image)
+    
+    # Invert colors (MNIST is white on black)
+    image_array = 255 - image_array
+    
+    # Normalize
+    image_array = image_array / 255.0
+    
+    # Reshape for model
+    image_array = image_array.reshape(1, 28, 28, 1)
+    
+    # Predict
+    prediction = model.predict(image_array, verbose=0)
+    predicted_digit = np.argmax(prediction)
+    confidence = prediction[0][predicted_digit] * 100
+    
+    # Display
+    plt.figure(figsize=(6, 6))
+    plt.imshow(image_array.reshape(28, 28), cmap='gray')
+    plt.title(f'Predicted: {predicted_digit} (Confidence: {confidence:.2f}%)', 
+              fontsize=14, fontweight='bold')
+    plt.axis('off')
+    plt.savefig(f'prediction_{predicted_digit}.png', dpi=300, bbox_inches='tight')
+    plt.show()
+    
+    print(f"Predicted Digit: {predicted_digit}")
+    print(f"Confidence: {confidence:.2f}%")
+    
+    return predicted_digit, confidence
+
+
+# ==================== STEP 9: VISUALIZE SAMPLE PREDICTIONS ====================
+
+def visualize_predictions(model, x_test, y_test, num_samples=10):
+    """
+    Visualize random test samples with predictions
+    """
+    print("\nVisualizing sample predictions...")
+    
+    # Randomly select samples
+    indices = np.random.choice(len(x_test), num_samples, replace=False)
+    
+    fig, axes = plt.subplots(2, 5, figsize=(15, 6))
+    axes = axes.ravel()
+    
+    for i, idx in enumerate(indices):
+        # Get image and true label
+        image = x_test[idx].reshape(28, 28)
+        true_label = np.argmax(y_test[idx])
+        
+        # Predict
+        pred = model.predict(x_test[idx:idx+1], verbose=0)
+        pred_label = np.argmax(pred)
+        confidence = pred[0][pred_label] * 100
+        
+        # Plot
+        axes[i].imshow(image, cmap='gray')
+        color = 'green' if pred_label == true_label else 'red'
+        axes[i].set_title(f'True: {true_label} | Pred: {pred_label}\nConf: {confidence:.1f}%',
+                         color=color, fontsize=10)
+        axes[i].axis('off')
+    
+    plt.tight_layout()
+    plt.savefig('sample_predictions.png', dpi=300, bbox_inches='tight')
+    plt.show()
+    
+    print("Sample predictions saved as 'sample_predictions.png'")
+
+
+# ==================== MAIN EXECUTION ====================
+
+def main():
+    """
+    Main function to run complete pipeline
+    """
+    print("="*60)
+    print("HANDWRITTEN DIGIT RECOGNITION - CNN MODEL")
+    print("="*60)
+    
+    # Step 1: Load data
+    x_train, y_train, x_val, y_val, x_test, y_test = load_and_preprocess_data()
+    
+    # Step 2: Create data augmentation
+    datagen = create_data_augmentation()
+    datagen.fit(x_train)
+    
+    # Step 3: Build model
+    model = build_cnn_model()
+    
+    # Step 4: Train model
+    history = train_model(model, x_train, y_train, x_val, y_val, datagen, epochs=20)
+    
+    # Step 5: Plot training curves
+    plot_training_history(history)
+    
+    # Step 6: Evaluate model
+    accuracy = evaluate_model(model, x_test, y_test)
+    
+    # Step 7: Confusion matrix
+    plot_confusion_matrix(model, x_test, y_test)
+    
+    # Step 8: Sample predictions
+    visualize_predictions(model, x_test, y_test)
+    
+    # Step 9: Save model
+    model.save('digit_recognition_model.h5')
+    print("\nModel saved as 'digit_recognition_model.h5'")
+    
+    # Step 10: Test on custom image (if exists)
+    try:
+        predict_custom_image('selected_image.png', model)
+    except:
+        print("\nNo custom image found. Skipping custom prediction.")
+    
+    print("\n" + "="*60)
+    print(f"TRAINING COMPLETE! Final Accuracy: {accuracy*100:.2f}%")
+    print("="*60)
+
+
+if __name__ == "__main__":
+    main()
